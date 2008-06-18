@@ -1,0 +1,112 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+use Getopt::Long;
+
+MAIN: {
+    my $RESULT_DELIMITER = "\n";
+
+    my $seq_name    = "";
+    my $prn_len     = 1;
+    my $help        = 0;
+    my $silent_mode = 0;
+    my $prn_match   = 1;
+
+    if (GetOptions(
+            "name|n=s" => \$seq_name,
+            "help|h"   => \$help,
+            "length|l!" => \$prn_len,
+            "match|m!"  => \$prn_match,
+        ) == 0
+        )
+    {
+        usage();
+        exit 0;
+    }
+
+    if ($help) {
+        usage();
+        exit 0;
+    }
+
+    my ($query, $fasta);
+    ($query, $fasta) = @ARGV;
+    if (!defined($query) || $query !~ /\w/) {
+        &usage;
+        exit 0;
+    }
+    $fasta = '-' if (!defined($fasta) || $fasta eq '');
+
+    my %SEQS        = ();
+    my $curr_contig = "";
+    open FA, $fasta
+        or die "Cannot open $fasta file for input: $!\n";
+    while (<FA>) {
+        chomp;
+        if (/^>\s*(\S+)/) {
+            $curr_contig = $1;
+            if ($seq_name eq "") {
+                @{ $SEQS{$curr_contig} } = ();
+            } else {
+                if (lc $curr_contig eq lc $seq_name) {
+                    @{ $SEQS{$curr_contig} } = ();
+                }
+            }
+            next;
+        }
+        if ($seq_name eq "") {
+            push @{ $SEQS{$curr_contig} }, lc $_;
+        } elsif (exists $SEQS{$curr_contig}) {
+            push @{ $SEQS{$curr_contig} }, lc $_;
+        }
+    }
+    if ($seq_name ne "" && scalar @{ $SEQS{$seq_name} } == 0) {
+        print "$seq_name not found\n";
+        exit 0;
+    }
+
+    my $print_match;
+    {
+        my @print_fields = ();
+        push @print_fields, 'name';
+        push @print_fields, 'position';
+        push @print_fields, 'length' if ($prn_len);
+        push @print_fields, 'match' if ($prn_match);
+        $print_match = sub {
+            my ($params) = @_;
+            print join(':', map { $params->{$_} } @print_fields), "\n";
+        };
+    }
+    for my $seq_name (sort keys %SEQS) {
+        my $subject = join "", @{ $SEQS{$seq_name} };
+        my $count = 0;
+        while ($subject =~ m/$query/igcx) {
+            $count++;
+            my $match    = $&;
+            my $length   = length($match);
+            my $position = (pos($subject) - $length);
+            $print_match->(
+                {   name     => $seq_name,
+                    position => $position,
+                    length   => $length,
+                    match    => $match
+                }
+            );
+        }
+    }
+    exit 0;
+}
+
+sub usage {
+    print <<endUsage;
+Usage:    $0 -hln sequence fasta_file
+Synopsis: Print positions of occurrences of a sequence pattern in a FASTA file
+   -h, --help
+          display these usage instructions
+   -l, --(no)length
+          print length of match pattern (DEFAULT: on)
+   -m, --(no)match
+          Print match pattern (DEFAULT: on)
+endUsage
+}
