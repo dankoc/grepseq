@@ -1,69 +1,52 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 use warnings;
 use strict;
 use Getopt::Long;
 
-MAIN: {
-    my $RESULT_DELIMITER = "\n";
+use constant OUTPUT_DELIMITER => ':';
+use constant EMPTY_STR        => q{};
 
-    my $seq_name    = "";
+MAIN: {
     my $prn_len     = 1;
     my $help        = 0;
-    my $silent_mode = 0;
     my $prn_match   = 1;
+    my $ignore_case = 1;
 
     if (GetOptions(
-            "name|n=s" => \$seq_name,
-            "help|h"   => \$help,
-            "length|l!" => \$prn_len,
-            "match|m!"  => \$prn_match,
+            'help|h'         => \$help,
+            'length|l!'      => \$prn_len,
+            'match|m!'       => \$prn_match,
+            'ignore-case|i!' => \$ignore_case
         ) == 0
         )
     {
-        usage();
-        exit 0;
+        usage_and_exit(1, "Wrong parameters.");
     }
-
+    
     if ($help) {
-        usage();
-        exit 0;
+        usage_and_exit(0);
     }
 
     my ($query, $fasta);
     ($query, $fasta) = @ARGV;
     if (!defined($query) || $query !~ /\w/) {
-        &usage;
-        exit 0;
+        usage_and_exit(1, "No query pattern specified.");
     }
-    $fasta = '-' if (!defined($fasta) || $fasta eq '');
+    $fasta = '-' if (!defined($fasta) || $fasta eq EMPTY_STR);
 
     my %SEQS        = ();
-    my $curr_contig = "";
+    my $curr_contig = EMPTY_STR;
     open FA, $fasta
         or die "Cannot open $fasta file for input: $!\n";
     while (<FA>) {
         chomp;
         if (/^>\s*(\S+)/) {
             $curr_contig = $1;
-            if ($seq_name eq "") {
-                @{ $SEQS{$curr_contig} } = ();
-            } else {
-                if (lc $curr_contig eq lc $seq_name) {
-                    @{ $SEQS{$curr_contig} } = ();
-                }
-            }
             next;
         }
-        if ($seq_name eq "") {
-            push @{ $SEQS{$curr_contig} }, lc $_;
-        } elsif (exists $SEQS{$curr_contig}) {
-            push @{ $SEQS{$curr_contig} }, lc $_;
-        }
-    }
-    if ($seq_name ne "" && scalar @{ $SEQS{$seq_name} } == 0) {
-        print "$seq_name not found\n";
-        exit 0;
+        $SEQS{$curr_contig} ||= [];
+        push @{ $SEQS{$curr_contig} }, lc $_;
     }
 
     my $print_match;
@@ -75,13 +58,16 @@ MAIN: {
         push @print_fields, 'match' if ($prn_match);
         $print_match = sub {
             my ($params) = @_;
-            print join(':', map { $params->{$_} } @print_fields), "\n";
+            print join(OUTPUT_DELIMITER, map { $params->{$_} } @print_fields),
+                "\n";
         };
     }
+    my $ignore_flag = $ignore_case == 1 ? '(?i)' : EMPTY_STR;
     for my $seq_name (sort keys %SEQS) {
-        my $subject = join "", @{ $SEQS{$seq_name} };
+        my $subject = join EMPTY_STR, @{ $SEQS{$seq_name} };
         my $count = 0;
-        while ($subject =~ m/$query/igcx) {
+
+        while ($subject =~ m/$ignore_flag$query/gcx) {
             $count++;
             my $match    = $&;
             my $length   = length($match);
@@ -98,15 +84,29 @@ MAIN: {
     exit 0;
 }
 
-sub usage {
-    print <<endUsage;
-Usage:    $0 -hln sequence fasta_file
-Synopsis: Print positions of occurrences of a sequence pattern in a FASTA file
+sub usage_and_exit {
+    my ($code, $message) = @_;
+    print "$message\n" if (defined $message);
+    print <<END_USAGE;
+USAGE
+    $0 [options] PATTERN FASTA_FILE
+    
+SYNOPSIS
+    Print matches of a sequence pattern in a FASTA file
+
+OPTIONS
    -h, --help
-          display these usage instructions
-   -l, --(no)length
+          Display these instructions
+
+   -i/-no-i, --ignore-case/--no-ignore-case
+          Ignore case distinction in pattern and input files (DEFAULT: on)
+
+   -l/-no-l, --length/--no-length
           print length of match pattern (DEFAULT: on)
-   -m, --(no)match
+
+   -m/-no-m, --match/--no-match
           Print match pattern (DEFAULT: on)
-endUsage
+
+END_USAGE
+    exit $code;
 }
